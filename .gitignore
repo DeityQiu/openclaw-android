@@ -1,0 +1,4 @@
+*.class
+*.apk
+out/
+node_modules/
