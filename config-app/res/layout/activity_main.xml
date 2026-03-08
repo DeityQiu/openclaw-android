@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:spacing="8dp">
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="OpenClaw Settings" android:textSize="20sp" android:textStyle="bold"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Model Provider"/>
+        <Spinner android:id="@+id/spinnerProvider"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="API Key"/>
+        <EditText android:id="@+id/etApiKey"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="textPassword" android:hint="sk-..."
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Model Name"/>
+        <EditText android:id="@+id/etModelName"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="text" android:hint="claude-sonnet-4-5"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Gateway Host"/>
+        <EditText android:id="@+id/etServerHost"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="text" android:hint="127.0.0.1"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Gateway Port"/>
+        <EditText android:id="@+id/etServerPort"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="number" android:hint="18789"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Gateway Token"/>
+        <EditText android:id="@+id/etGatewayToken"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="textPassword" android:hint="token..."
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Wake Word"/>
+        <EditText android:id="@+id/etWakeWord"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="text" android:hint="hey openclaw"
+            android:layout_marginBottom="8dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Bridge Port"/>
+        <EditText android:id="@+id/etBridgePort"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="number" android:hint="7788"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="Voice Listener"/>
+            <Switch android:id="@+id/switchVoice"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tvStatus"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="● Bridge: Unknown" android:textSize="14sp"
+            android:layout_marginBottom="12dp"/>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <Button android:id="@+id/btnSave"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="Save" android:layout_marginEnd="8dp"/>
+            <Button android:id="@+id/btnTest"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:text="Test Bridge"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>
