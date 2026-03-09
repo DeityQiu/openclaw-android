@@ -1,44 +1,117 @@
 package com.openclaw.settings;
-import android.app.*; import android.content.*; import android.media.*; import android.os.*; import android.util.Log;
-import org.json.JSONObject; import java.util.concurrent.*;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.IBinder;
+import android.util.Log;
+
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 public class VoiceListenerService extends Service {
-    private static final String TAG="OpenClaw.Voice", CHANNEL_ID="oc_voice";
-    private static final int NOTIF_ID=1001, SAMPLE_RATE=16000, FRAME_SIZE=1280;
-    private AudioRecord rec; private volatile boolean running; private ExecutorService exec;
-    private WakeWordDetector wwd; private WhisperASR asr;
-    public void onCreate(){super.onCreate();createChannel();exec=Executors.newCachedThreadPool();wwd=new WakeWordDetector(this);asr=new WhisperASR(this);}
-    public int onStartCommand(Intent i,int f,int s){startForeground(NOTIF_ID,buildNotif("Listening..."));if(!running){running=true;exec.execute(this::loop);}return START_STICKY;}
-    public IBinder onBind(Intent i){return null;}
-    public void onDestroy(){running=false;if(rec!=null){rec.stop();rec.release();}exec.shutdownNow();}
-    private void loop(){
-        int buf=Math.max(AudioRecord.getMinBufferSize(SAMPLE_RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT),FRAME_SIZE*2);
-        rec=new AudioRecord(MediaRecorder.AudioSource.MIC,SAMPLE_RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,buf);
-        rec.startRecording(); Log.i(TAG,"listening");
-        short[] frame=new short[FRAME_SIZE];
-        while(running){
-            try{
-                int n=rec.read(frame,0,FRAME_SIZE);if(n<0)continue;
-                if(wwd.detect(frame)){
-                    updateNotif("Transcribing...");
-                    short[] cmd=new short[SAMPLE_RATE*3];rec.read(cmd,0,cmd.length);
-                    exec.execute(()->{
-                        String t=asr.transcribe(cmd);
-                        if(t!=null&&!t.trim().isEmpty())sendToBridge(t.trim());
-                        updateNotif("Listening...");
-                    });
-                }
-            }catch(Exception e){Log.e(TAG,"loop err",e);}
+    private static final String TAG = "OpenClawVoice";
+    private static final String CHANNEL_ID = "openclaw_voice";
+    private static final int NOTIFICATION_ID = 1002;
+
+    private WakeWordDetector wakeWordDetector;
+    private WhisperASR whisperASR;
+    private volatile boolean running = false;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        startForegroundNotification();
+        SharedPreferences prefs = getSharedPreferences("openclaw_config", MODE_PRIVATE);
+        String wakeWord = prefs.getString("wake_word", "hey openclaw");
+        try {
+            wakeWordDetector = new WakeWordDetector(wakeWord);
+            whisperASR = new WhisperASR("/system/etc/openclaw/ggml-base.bin");
+            running = true;
+            new Thread(this::listenLoop).start();
+            Log.i(TAG, "Voice listener started, wake word: " + wakeWord);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to init voice listener", e);
         }
     }
-    private void sendToBridge(String text){
-        try{
-            JSONObject p=new JSONObject();p.put("text",text);p.put("source","voice");
-            String msg=new JSONObject().put("id",(int)(System.currentTimeMillis()%100000)).put("method","Android.voiceCommand").put("params",p).toString();
-            int port=getSharedPreferences("openclaw_config",0).getInt("bridge_port",7788);
-            BridgeClient.sendOnce("127.0.0.1",port,msg);
-        }catch(Exception e){Log.e(TAG,"sendToBridge",e);}
+
+    private void listenLoop() {
+        while (running) {
+            try {
+                if (wakeWordDetector.detect()) {
+                    Log.i(TAG, "Wake word detected, starting ASR...");
+                    String text = whisperASR.transcribe();
+                    if (text != null && !text.trim().isEmpty()) {
+                        Log.i(TAG, "Recognized: " + text);
+                        sendToGateway(text.trim());
+                    }
+                }
+                Thread.sleep(100);
+            } catch (Exception e) {
+                Log.e(TAG, "Voice loop error", e);
+                try { Thread.sleep(1000); } catch (InterruptedException ie) { break; }
+            }
+        }
     }
-    private void createChannel(){NotificationChannel c=new NotificationChannel(CHANNEL_ID,"OpenClaw",NotificationManager.IMPORTANCE_LOW);((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(c);}
-    private Notification buildNotif(String t){return new Notification.Builder(this,CHANNEL_ID).setContentTitle("OpenClaw").setContentText(t).setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true).build();}
-    private void updateNotif(String t){((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(NOTIF_ID,buildNotif(t));}
+
+    private void sendToGateway(String text) {
+        new Thread(() -> {
+            try {
+                SharedPreferences prefs = getSharedPreferences("openclaw_config", MODE_PRIVATE);
+                int gatewayPort = prefs.getInt("gateway_port", 18789);
+                String gatewayToken = prefs.getString("gateway_token", "");
+                URL url = new URL("http://127.0.0.1:" + gatewayPort + "/voice");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Authorization", "Bearer " + gatewayToken);
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(3000);
+                String body = "{\"text\":\"" + text.replace("\"", "\\\"") + "\",\"source\":\"voice\"}";
+                OutputStream os = conn.getOutputStream();
+                os.write(body.getBytes("UTF-8"));
+                os.close();
+                int code = conn.getResponseCode();
+                Log.i(TAG, "Sent to gateway, response: " + code);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to send to gateway: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private void startForegroundNotification() {
+        try {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID, "OpenClaw Voice", NotificationManager.IMPORTANCE_LOW);
+            nm.createNotificationChannel(channel);
+            Notification notification = new Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("OpenClaw Voice")
+                .setContentText("Listening for wake word...")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .build();
+            startForeground(NOTIFICATION_ID, notification);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start foreground", e);
+        }
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) { return null; }
+
+    @Override
+    public void onDestroy() {
+        running = false;
+        try { if (wakeWordDetector != null) wakeWordDetector.release(); } catch (Exception e) {}
+        super.onDestroy();
+    }
 }

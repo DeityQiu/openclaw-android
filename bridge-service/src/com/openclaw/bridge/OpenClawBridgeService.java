@@ -1,64 +1,89 @@
 package com.openclaw.bridge;
 
-import android.content.Context;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Intent;
+import android.os.IBinder;
 import android.util.Log;
-import com.android.server.SystemService;
-import com.openclaw.bridge.event.ActivityEventWatcher;
-import com.openclaw.bridge.event.WindowEventWatcher;
 
-/**
- * OpenClaw Android Bridge Service.
- *
- * Registered in AOSP SystemServer:
- *   mSystemServiceManager.startService(OpenClawBridgeService.class);
- *
- * Runs with system UID. Starts WebSocket server on port 7788.
- * Implements CDP-style protocol for OpenClaw Android Node.
- */
-public class OpenClawBridgeService extends SystemService {
-    private static final String TAG = "OpenClaw.BridgeService";
+public class OpenClawBridgeService extends Service {
+    private static final String TAG = "OpenClawBridge";
+    private static final int NOTIFICATION_ID = 1001;
+    private static final String CHANNEL_ID = "openclaw_bridge";
+    private static final int BRIDGE_PORT = 7788;
 
     private WsServer wsServer;
+    private DeviceController deviceController;
     private ActivityEventWatcher activityWatcher;
     private WindowEventWatcher windowWatcher;
 
-    public OpenClawBridgeService(Context context) {
-        super(context);
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        startForegroundNotification();
+        startBridge();
     }
 
-    @Override
-    public void onStart() {
-        Log.i(TAG, "OpenClawBridgeService starting...");
+    private void startBridge() {
         try {
-            Context ctx = getContext();
-
-            // Build the device controller (requires system UID permissions)
-            DeviceController controller = new DeviceController(ctx);
-
-            // Build the CDP dispatcher (routes commands to controller)
-            CdpDispatcher dispatcher = new CdpDispatcher(controller);
-
-            // Start WebSocket server
-            wsServer = new WsServer(dispatcher);
+            deviceController = new DeviceController(this);
+            CdpDispatcher dispatcher = new CdpDispatcher(deviceController);
+            wsServer = new WsServer(BRIDGE_PORT, dispatcher);
             wsServer.start();
-
-            // Start event watchers
-            activityWatcher = new ActivityEventWatcher(ctx, wsServer);
-            activityWatcher.start();
-
-            windowWatcher = new WindowEventWatcher(ctx, wsServer);
-            windowWatcher.start();
-
-            Log.i(TAG, "OpenClawBridgeService started on ws://0.0.0.0:7788");
+            Log.i(TAG, "OpenClaw Bridge started on port " + BRIDGE_PORT);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start OpenClawBridgeService", e);
+            // DO NOT rethrow — crashing here with persistent=true causes boot loop
+            Log.e(TAG, "Bridge failed to start, service will idle", e);
+        }
+
+        try {
+            activityWatcher = new ActivityEventWatcher(this);
+            activityWatcher.start();
+            windowWatcher = new WindowEventWatcher(this);
+            windowWatcher.start();
+        } catch (Exception e) {
+            Log.e(TAG, "Event watchers failed to start", e);
+        }
+    }
+
+    private void startForegroundNotification() {
+        try {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID, "OpenClaw Bridge", NotificationManager.IMPORTANCE_LOW);
+            nm.createNotificationChannel(channel);
+            Notification notification = new Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("OpenClaw Bridge")
+                .setContentText("Running on port " + BRIDGE_PORT)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .build();
+            startForeground(NOTIFICATION_ID, notification);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start foreground", e);
         }
     }
 
     @Override
-    public void onBootPhase(int phase) {
-        if (phase == SystemService.PHASE_SYSTEM_SERVICES_READY) {
-            Log.i(TAG, "System services ready — OpenClaw Bridge fully operational");
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
+
+    @Override
+    public void onDestroy() {
+        try {
+            if (wsServer != null) wsServer.stop();
+            if (activityWatcher != null) activityWatcher.stop();
+            if (windowWatcher != null) windowWatcher.stop();
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping bridge", e);
         }
+        super.onDestroy();
     }
 }

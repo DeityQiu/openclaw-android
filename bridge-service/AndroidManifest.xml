@@ -5,7 +5,6 @@
     android:versionCode="1"
     android:versionName="1.0.0">
 
-    <!-- System-level permissions: granted automatically when built into AOSP -->
     <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <uses-permission android:name="android.permission.READ_FRAME_BUFFER" />
     <uses-permission android:name="android.permission.MANAGE_ACTIVITY_STACKS" />
@@ -19,13 +18,22 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- NO android:persistent="true" — causes boot loop if service crashes -->
     <application
         android:label="OpenClaw Bridge"
-        android:persistent="true"
         android:allowBackup="false">
 
-        <!-- BridgeService is registered directly in SystemServer, not here -->
-        <!-- This manifest is for the companion config app component -->
+        <service
+            android:name=".OpenClawBridgeService"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
