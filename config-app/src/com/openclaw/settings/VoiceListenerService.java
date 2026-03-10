@@ -6,6 +6,9 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.IBinder;
 import android.util.Log;
 
@@ -17,6 +20,10 @@ public class VoiceListenerService extends Service {
     private static final String TAG = "OpenClawVoice";
     private static final String CHANNEL_ID = "openclaw_voice";
     private static final int NOTIFICATION_ID = 1002;
+
+    private static final int SAMPLE_RATE = 16000;
+    private static final int RECORD_SECONDS = 5;
+    private static final int RECORD_SAMPLES = SAMPLE_RATE * RECORD_SECONDS;
 
     private WakeWordDetector wakeWordDetector;
     private WhisperASR whisperASR;
@@ -30,7 +37,7 @@ public class VoiceListenerService extends Service {
         String wakeWord = prefs.getString("wake_word", "hey openclaw");
         try {
             wakeWordDetector = new WakeWordDetector(wakeWord);
-            whisperASR = new WhisperASR("/system/etc/openclaw/ggml-base.bin");
+            whisperASR = new WhisperASR(this);
             running = true;
             new Thread(this::listenLoop).start();
             Log.i(TAG, "Voice listener started, wake word: " + wakeWord);
@@ -42,15 +49,26 @@ public class VoiceListenerService extends Service {
     private void listenLoop() {
         while (running) {
             try {
+                // 阻塞等待唤醒词
                 if (wakeWordDetector.detect()) {
-                    Log.i(TAG, "Wake word detected, starting ASR...");
-                    String text = whisperASR.transcribe();
-                    if (text != null && !text.trim().isEmpty()) {
-                        Log.i(TAG, "Recognized: " + text);
-                        sendToGateway(text.trim());
+                    Log.i(TAG, "Wake word detected, recording command...");
+                    // 唤醒词检测器先暂停，再录音避免冲突
+                    wakeWordDetector.release();
+
+                    short[] audio = recordCommand();
+                    if (audio != null) {
+                        String text = whisperASR.transcribe(audio);
+                        if (text != null && !text.trim().isEmpty()) {
+                            Log.i(TAG, "Recognized: " + text);
+                            sendToGateway(text.trim());
+                        }
                     }
+
+                    // 重新初始化 wake word 检测
+                    SharedPreferences prefs = getSharedPreferences("openclaw_config", MODE_PRIVATE);
+                    String wakeWord = prefs.getString("wake_word", "hey openclaw");
+                    wakeWordDetector = new WakeWordDetector(wakeWord);
                 }
-                Thread.sleep(100);
             } catch (Exception e) {
                 Log.e(TAG, "Voice loop error", e);
                 try { Thread.sleep(1000); } catch (InterruptedException ie) { break; }
@@ -58,11 +76,38 @@ public class VoiceListenerService extends Service {
         }
     }
 
+    private short[] recordCommand() {
+        try {
+            int bufSize = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            AudioRecord recorder = new AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                Math.max(bufSize, RECORD_SAMPLES * 2));
+            recorder.startRecording();
+            short[] audio = new short[RECORD_SAMPLES];
+            int read = 0;
+            while (read < RECORD_SAMPLES) {
+                int n = recorder.read(audio, read, RECORD_SAMPLES - read);
+                if (n <= 0) break;
+                read += n;
+            }
+            recorder.stop();
+            recorder.release();
+            return audio;
+        } catch (Exception e) {
+            Log.e(TAG, "recordCommand failed", e);
+            return null;
+        }
+    }
+
     private void sendToGateway(String text) {
         new Thread(() -> {
             try {
                 SharedPreferences prefs = getSharedPreferences("openclaw_config", MODE_PRIVATE);
-                int gatewayPort = prefs.getInt("gateway_port", 18789);
+                int gatewayPort = prefs.getInt("server_port", 18789);
                 String gatewayToken = prefs.getString("gateway_token", "");
                 URL url = new URL("http://127.0.0.1:" + gatewayPort + "/voice");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
